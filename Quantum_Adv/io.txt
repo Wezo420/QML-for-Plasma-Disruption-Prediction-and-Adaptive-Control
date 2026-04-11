@@ -1,0 +1,24 @@
+ 1. Inputs (What we feed the Reservoir)
+  The reservoir receives a 3-dimensional time series representing the state of the Lorenz system at each timestep $t$.
+
+   * State Vector ($x, y, z$): The primary input is the current position of the system in its 3D state space.
+   * Embedded Parameter Drift: While we don't explicitly feed the value of $\rho$ to the reservoir, the dynamic change in the $(x, y, z)$ coordinates implicitly carries the information about the parameter
+     drift. As $\rho$ increases towards 24.74, the system's "behavior" changes (trajectories become more unstable), and the reservoir learns to detect these subtle mathematical signatures.
+   * Preprocessing: These 3D inputs are scaled between 0 and 1 using a MinMaxScaler before being encoded into the quantum basis states via $R_y$ rotation gates.
+
+  2. Outputs (What the Reservoir Predicts)
+  The output of the experiment is a scalar "Warning Signal" (intensity between 0 and 1).
+
+   * Proximity Signal ($Y$): During training, we defined the target output as a "Material Value" based on the mathematical distance to the critical threshold:
+      $$Y = \frac{1}{1 + |\rho - 24.74|}$$
+       * When the system is far from the tipping point, the output is low.
+       * As $\rho$ approaches 24.74, the target approaches 1.0, creating a "spike" at the transition.
+   * Warning Signal Prediction: In the testing phase, the QRC looks at new Lorenz data (where it doesn't know the $\rho$ value) and predicts this signal. A rising value serves as an early warning, indicating
+     that the "plasma pulse" is nearing the point of confinement loss (chaos).
+
+  Technical Mapping (The "Hidden" Layer)
+   * Internal State: The 3-dimensional input is mapped into a 32-dimensional quantum state (because we used 5 qubits, $2^5 = 32$).
+   * Readout: The output is calculated by taking a linear combination of these 32 quantum basis state probabilities (plus 1 bias term) using the $W_{out}$ matrix learned during the Ridge Regression training
+     phase.
+
+  In summary: Input = 3D physical state $(x, y, z)$ $\rightarrow$ Output = 1D "Danger Level" / Warning Signal.
