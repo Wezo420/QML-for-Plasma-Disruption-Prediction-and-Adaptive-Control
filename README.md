@@ -139,7 +139,7 @@ python VPT_Experiment/vpt_experiment.py
 
 ### Articles:
 
-Title: Robust quantum reservoir computers for forecasting chaotic dynamics: Generalized synchronization and stability
-Journal: Proceedings of the Royal Society A
-Year: 2025
+Title: Robust quantum reservoir computers for forecasting chaotic dynamics: Generalized synchronization and stability  
+Journal: Proceedings of the Royal Society A  
+Year: 2025  
 DOI: https://doi.org/10.1098/rspa.2025.0550
