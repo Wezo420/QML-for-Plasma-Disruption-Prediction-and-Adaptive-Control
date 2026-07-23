@@ -137,12 +137,9 @@ python VPT_Experiment/vpt_experiment.py
 
 ## Reference
 
-```bibtex
-@article{ahmed2025robust,
-  title   = {Robust quantum reservoir computers for forecasting chaotic dynamics:
-             generalized synchronization and stability},
-  journal = {Proceedings of the Royal Society A},
-  year    = {2025},
-  doi     = {10.1098/rspa.2025.0550}
-}
-```
+### Articles:
+
+Title: Robust quantum reservoir computers for forecasting chaotic dynamics: Generalized synchronization and stability
+Journal: Proceedings of the Royal Society A
+Year: 2025
+DOI: https://doi.org/10.1098/rspa.2025.0550
