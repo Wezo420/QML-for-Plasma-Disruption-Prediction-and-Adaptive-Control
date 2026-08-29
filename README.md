@@ -1,4 +1,4 @@
-# ⚛️ Quantum Reservoir Computing for Plasma Disruption Prediction
+# Quantum Reservoir Computing for Plasma Disruption Prediction
 
 > **Applicability Proof-of-Concept (Evaluation 1)**
 >
@@ -7,7 +7,7 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Overview](#overview)
 - [Results at a Glance](#results-at-a-glance)
