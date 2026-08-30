@@ -289,6 +289,8 @@ CIRCUIT_LIBRARY: Dict[str, CircuitSpec] = {
     ),
     "qasm_reupload_dual_a": CircuitSpec(
         _build_qasm_reupload_dual_a, False,
+        "Reconstructed from user-supplied ReservoirCircuit_Nonlinear_GENE_Config1.qasm "
+        "(via qasm_aer.ipynb's rendered circuit diagram -- see module docstring) [NEW to ensemble]",
         "H -> X:chain-ladder x n_qubits (data re-upload) -> A:dense-entangle-mirrored x2",
     ),
 }
