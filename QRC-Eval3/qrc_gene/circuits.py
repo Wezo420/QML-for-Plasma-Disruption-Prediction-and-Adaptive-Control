@@ -1,144 +1,64 @@
 """
 circuits.py
 ===========
-Parameterised quantum-circuit building blocks used to assemble the QRC
-encoding / reservoir / readout-prep stages shown on slide 9 of the project
-presentation ("Quantum Circuit Demonstration"):
+DEPRECATED as of Eval-3. This module used to define its own independent
+circuit-block registry (``ENCODER_REGISTRY`` / ``CIRCUIT_CONFIGS``, string
+keys like ``"linear_linear"``), separate from the one ``quantum_reservoir.py``
+actually validates ``QRCConfig.circuit_config`` against. That split is
+exactly what made ``ensemble_search.py``'s QRC sweep silently unusable
+(``QRC_SEARCH_SPACE`` sampled keys from here, ``QRCConfig`` rejected all of
+them) -- see the changelog comment at the top of ``ensemble_search.py``.
 
-    1. Data encoding & superposition  -> Hadamard layer + RY rotation encoding
-    2. Quantum reservoir evolution    -> fixed entangling unitary (CNOTs)
-    3. Measurement & feature vector   -> handled in quantum_reservoir.py
-    4. Classical readout              -> handled in quantum_reservoir.py
-
-The block design (RY-rotation encoding followed by a layer of CNOT
-entanglers, repeated for the input block X, a fixed random block A, and
-optionally a trainable-but-frozen block P) follows the general pattern
-used in Ahmed, Tennie & Magri, "Robust quantum reservoir computers for
-forecasting chaotic dynamics" and the accompanying MagriLab
-Stability_QRC_GS reference implementation that this project is based on
-(https://github.com/MagriLab/Stability_QRC_GS). The functions below are
-an independent, simplified re-implementation for this project (fewer,
-better-documented block types; no Qiskit-version-specific label kwargs)
-rather than a direct copy.
-
-Every block function takes a Qiskit ``QuantumCircuit`` and mutates it in
-place (matching the reference repo's convention), then returns it for
-convenience.
+There is now exactly one circuit registry,
+``quantum_reservoir.CIRCUIT_LIBRARY``, so it can't drift out of sync with
+``QRCConfig`` again. This module is kept only so old notebook cells or
+external scripts that still do ``from qrc_gene.circuits import
+CIRCUIT_CONFIGS`` don't hard-crash; the names below are aliases onto the new
+registry, not a second implementation. New code should import directly from
+``quantum_reservoir`` instead.
 """
 from __future__ import annotations
 
-from itertools import combinations
-from typing import Sequence
+import warnings
 
-from qiskit import QuantumCircuit
+from .quantum_reservoir import (
+    CIRCUIT_LIBRARY,
+    CIRCUIT_CONFIG_INFO,
+    apply_chain_ladder,
+    apply_dense_entangler,
+    apply_pairwise_product_encoder,
+)
 
+warnings.warn(
+    "qrc_gene.circuits is deprecated; import CIRCUIT_LIBRARY (and the "
+    "apply_* block functions) from qrc_gene.quantum_reservoir instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-def linear_entangler(n_qubits: int, params: Sequence[float], qc: QuantumCircuit) -> QuantumCircuit:
-    """RY rotation on every qubit (cycling through ``params`` if there are
-    more parameters than qubits) followed by a nearest-neighbour CNOT
-    chain (0->1->2->...->n-1->0). This is the cheapest entangling block
-    ("Linear" in the presentation / reference repo naming) -- O(n) gates,
-    good default for larger qubit counts."""
-    for j, p in enumerate(params):
-        qc.ry(p, j % n_qubits)
-    for i in range(n_qubits):
-        target = 0 if i == n_qubits - 1 else i + 1
-        qc.cx(i, target)
-    return qc
+# kept only for backward compatibility.
+CIRCUIT_CONFIGS = CIRCUIT_CONFIG_INFO
 
-
-def fully_entangled(n_qubits: int, params: Sequence[float], qc: QuantumCircuit,
-                     symmetric: bool = False) -> QuantumCircuit:
-    """RY rotation encoding followed by an all-to-all CNOT entangling
-    layer (every qubit pair connected once). This is the "Fully
-    Entangled" block -- O(n^2) gates, richer feature map, matches the
-    fully-connected circuit shown in Figure 1 of the presentation.
-
-    If ``symmetric``, a second RY layer using the remaining parameters
-    (or the same parameters again if there are exactly n_qubits of them)
-    is applied after the entangling layer, mirroring the reference
-    repo's ``Unitary_FullyEntSym`` block used for the fixed random-angle
-    block ``A``.
-    """
-    params = list(params)
-    for j in range(min(len(params), n_qubits)):
-        qc.ry(params[j], j)
-
-    for i, k in combinations(range(n_qubits), 2):
-        qc.cx(i, k)
-
-    if symmetric:
-        second_half = params[n_qubits:] if len(params) > n_qubits else params
-        for j, p in enumerate(second_half):
-            qc.ry(p, j % n_qubits)
-    return qc
+# Old function names -> new implementations (signature differs slightly:
+# the new versions take ``(qc, n, params, name)`` with ``qc`` first, matching
+# every other Qiskit in-place-mutation convention; these thin wrappers
+# restore the old ``(n, params, qc)`` argument order for any caller still
+# using it).
+def linear_entangler(n_qubits, params, qc):
+    return apply_chain_ladder(qc, n_qubits, params, "X")
 
 
-def feature_map_products(n_qubits: int, params: Sequence[float], qc: QuantumCircuit) -> QuantumCircuit:
-    """RZ rotation encoding followed by pairwise ZZ-like interactions
-    RY(x_i * x_j) sandwiched between CNOTs on every qubit pair. This
-    directly encodes pairwise *products* of input features into the
-    entangling angles (a nonlinear feature map), matching the
-    reference repo's ``Unitary_Feature`` block."""
-    params = list(params)
-    n_use = min(len(params), n_qubits)
-    for j in range(n_use):
-        qc.rz(params[j], j)
-
-    pairs = combinations(range(n_use), 2)
-    for i, k in pairs:
-        qc.cx(i, k)
-        qc.ry(params[i] * params[k], k)
-        qc.cx(i, k)
-    return qc
+def fully_entangled(n_qubits, params, qc, symmetric=False):
+    return apply_dense_entangler(qc, n_qubits, params, "X", mirror=symmetric)
 
 
-# Registry so callers (e.g. an ensemble sweep) can select an encoder by name.
+def feature_map_products(n_qubits, params, qc):
+    return apply_pairwise_product_encoder(qc, n_qubits, params, "X")
+
+
 ENCODER_REGISTRY = {
     "linear": linear_entangler,
     "full": lambda n, p, qc: fully_entangled(n, p, qc, symmetric=False),
     "full_sym": lambda n, p, qc: fully_entangled(n, p, qc, symmetric=True),
     "feature_product": feature_map_products,
-}
-
-
-def build_reservoir_circuit(
-    n_qubits: int,
-    x_params: Sequence[float],
-    alpha_params: Sequence[float],
-    x_encoder: str = "full",
-    alpha_encoder: str = "full_sym",
-    hadamard: bool = True,
-) -> QuantumCircuit:
-    """Assemble the full per-timestep reservoir circuit:
-
-        H^(x n_had)  ->  x_encoder(X)  ->  alpha_encoder(alpha)
-
-    where ``X`` carries the (scaled) plasma-state input for this timestep
-    and ``alpha`` are the fixed random angles that define the reservoir's
-    (untrained) internal dynamics -- exactly Blocks 1 and 2 of the
-    "Quantum Circuit Demonstration" on slide 9. The classical-readout
-    weights are trained separately (Block 4); this circuit itself is
-    never trained.
-    """
-    qc = QuantumCircuit(n_qubits)
-    if hadamard:
-        n_had = min(len(x_params), n_qubits)
-        qc.h(range(n_had))
-
-    ENCODER_REGISTRY[x_encoder](n_qubits, x_params, qc)
-    ENCODER_REGISTRY[alpha_encoder](n_qubits, alpha_params, qc)
-    return qc
-
-
-# A handful of named "configurations" analogous to the reference repo's
-# config 1-9, expressed as (x_encoder, alpha_encoder) pairs so an ensemble
-# sweep can iterate over them by name.
-CIRCUIT_CONFIGS = {
-    "linear_linear": ("linear", "linear"),
-    "linear_fullsym": ("linear", "full_sym"),
-    "full_full": ("full", "full"),
-    "full_fullsym": ("full", "full_sym"),
-    "feature_linear": ("feature_product", "linear"),
-    "feature_fullsym": ("feature_product", "full_sym"),
 }

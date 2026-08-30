@@ -27,7 +27,7 @@ notebooks/
     01_QRC_GENE_Main.ipynb                 deliverable 1's execution notebook
     02_QRC_Ensemble_Configuration.ipynb    deliverable 2: hyperparameter/config ensemble sweep
 
-data/                          the GENE files you supplied (parameters.dat, nrg.dat,
+data/                          the GENE files (parameters.dat, nrg.dat,
                                 energy.dat, circular.dat, field/mom binary chunks)
 
 requirements.txt
@@ -53,7 +53,7 @@ runtime** (via `gene_io.load_run_info`) — nothing about the run is hard-coded:
 | `nx0`, `nky0`, `nz0` | `&box` | shape of every binary snapshot in `field.dat` / `mom_<species>.dat` |
 | `n_spec` | `&box` | number of per-species blocks in `nrg.dat` |
 | `n_fields` | `&info` | number of variables per field-file snapshot (1 = electrostatic-only, as in the supplied run) |
-| `n_moms` | `&info` | number of variables per mom-file snapshot (6 in the supplied run: `n1, T1par, T1perp, q1par+1.5p0u1par, q1perp+p0u1par, u1par`) |
+| `n_moms` | `&info` | number of variables per mom-file snapshot (6 in the current run: `n1, T1par, T1perp, q1par+1.5p0u1par, q1perp+p0u1par, u1par`) |
 | `nrgcols` | `&info` | number of columns per `nrg.dat` species line (8 or 10; the supplied run has 10, i.e. toroidal-angular-momentum columns included) |
 | `dt_max` | `&general` | base simulation timestep, used to convert sample counts to physical time (e.g. in the VPT metric) |
 

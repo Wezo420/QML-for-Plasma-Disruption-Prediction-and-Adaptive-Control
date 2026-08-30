@@ -30,10 +30,13 @@ closest real-physics analogue of "approaching the critical point".
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+
+from . import gene_io
 
 
 # --------------------------------------------------------------------------
@@ -331,3 +334,223 @@ def build_dataset(
         n_washout=n_washout, n_train=n_train, n_val=n_val, n_test=n_test,
     )
     return split, scaler
+
+
+# --------------------------------------------------------------------------
+# field.dat / mom_<species>.dat -> POD features (Eval-3 addition)
+# --------------------------------------------------------------------------
+#
+# WHY THIS WASN'T USED BEFORE
+# ----------------------------
+# Every raw field/mom snapshot is a (nx0, nky0, nz0) complex array *per
+# variable* -- for this run's grid (nx0=96, nky0=64, nz0=24) that's 147,456
+# complex numbers = 2,359,296 bytes per variable per snapshot. field.dat has
+# 1 variable/snapshot, mom_ions.dat has 6. Feeding that directly into a
+# reservoir with a handful of qubits (or even a few hundred classical ESN
+# units) makes no sense dimensionally, so *some* reduction step is required
+# first -- consistent with the presentation's own "Physics-Informed Feature
+# Extraction / PCA or POD" step.
+#
+# But dimensionality is a solvable problem; the actual blocker with the data
+# supplied for this project is simpler and unconditional: the *chunk* files
+# are smaller than a single snapshot. Verified directly against the supplied
+# files (nx0=96, nky0=64, nz0=24 from parameters.dat):
+#
+#   field_chunk_1.dat:  943,718 bytes available; one full snapshot needs
+#                       2,359,320 bytes (time record + 1 variable record).
+#                       That's <40% of even the FIRST variable's payload.
+#   mom_ions_chunk_1.dat: 3,879,731 bytes available; one full snapshot needs
+#                       6 variable records = 14,155,840 bytes (+ time record).
+#                       The chunk contains 1 complete variable plus ~64% of
+#                       a second -- 0 of the 6 variables needed to call a
+#                       snapshot "complete".
+#
+# So there are exactly ZERO complete 3D snapshots in either supplied chunk --
+# not a code gap, a data-volume fact (see ``gene_io.snapshot_byte_requirements``
+# for the arithmetic, and ``gene_io.read_gene_binary``, which detects this
+# and reports ``n_complete=0, truncated=True`` rather than crashing).
+#
+# WHAT THIS SECTION ADDS
+# -----------------------
+# A real, tested reduction pipeline -- spectral energy by (kx, ky) mode,
+# then POD (SVD-based PCA) down to a handful of coefficients per variable --
+# that ``build_field_mom_features`` below will actually run and merge into
+# the reservoir's input state the moment enough complete snapshots exist
+# (either because a fuller ``field.dat``/``mom_ions.dat`` is supplied, or
+# because more sequential chunks are concatenated with
+# ``gene_io.concat_chunks``). Given only the single chunk of each file
+# available today, this path reports *why* it's inactive (see
+# ``FieldMomFeatureReport.reason``) and the rest of the pipeline proceeds on
+# ``nrg.dat``/``energy.dat`` features alone, exactly as before.
+
+def spectral_energy_by_k(snap: "gene_io.BinarySnapshots", var_index: int = 0) -> np.ndarray:
+    """Reduce each complex (nx0, nky0, nz0) snapshot of one field/mom
+    variable to a real (nx0, nky0) turbulent-energy-per-mode array by
+    summing |amplitude|^2 over the parallel (z) direction -- the standard
+    GENE k-spectrum diagnostic (GENE manual Sec. 4.2), and a physically
+    meaningful reduction step rather than an arbitrary flatten. Returns
+    shape (n_snap, nx0, nky0); ``n_snap`` may be 0 if ``snap`` has no
+    complete snapshots."""
+    if snap.n_complete == 0:
+        nx0, nky0 = snap.data.shape[-3], snap.data.shape[-2]
+        return np.empty((0, nx0, nky0))
+    amp = snap.data[:, var_index]                    # (n_snap, nx0, nky0, nz0)
+    return np.sum(np.abs(amp) ** 2, axis=-1)          # sum over z
+
+
+def pod_features(spectra: np.ndarray, n_components: int = 3) -> Tuple[np.ndarray, Dict]:
+    """POD (Proper Orthogonal Decomposition) of a (n_snap, ...) real
+    spectrum time series via economy SVD of the mean-centred, flattened
+    data matrix -- mathematically the same computation as PCA. Returns
+    (coefficients, info) where ``coefficients`` has shape
+    (n_snap, k) with ``k = min(n_components, n_snap-1, n_features)``, and
+    ``info`` reports what was actually used (``k``, ``explained_variance_
+    ratio``, whether ``n_components`` had to be reduced) so callers can
+    log/display the true fidelity of the reduction rather than assuming it
+    matched the request.
+
+    If fewer than 2 snapshots are available, POD is not meaningful (you
+    cannot estimate a covariance structure from 0 or 1 samples); an empty
+    ``(n_snap, 0)`` coefficient array is returned with ``info["skipped"] =
+    True`` and a human-readable ``info["reason"]``.
+    """
+    n_snap = spectra.shape[0]
+    if n_snap < 2:
+        return np.empty((n_snap, 0)), {
+            "skipped": True,
+            "reason": f"only {n_snap} complete snapshot(s) available; POD needs >= 2.",
+            "k": 0,
+        }
+
+    flat = spectra.reshape(n_snap, -1).astype(float)
+    mean = flat.mean(axis=0)
+    centred = flat - mean
+
+    k = min(n_components, n_snap - 1, flat.shape[1])
+    U, S, Vt = np.linalg.svd(centred, full_matrices=False)
+    coeffs = U[:, :k] * S[:k]
+    total_var = (S ** 2).sum()
+    explained = (S[:k] ** 2) / total_var if total_var > 0 else np.zeros(k)
+
+    info = {
+        "skipped": False,
+        "k": k,
+        "requested_components": n_components,
+        "reduced_from_request": k < n_components,
+        "explained_variance_ratio": explained,
+        "mean": mean,
+        "components": Vt[:k],
+    }
+    return coeffs, info
+
+
+@dataclass
+class FieldMomFeatureReport:
+    """Diagnostic summary of one field/mom POD-feature-extraction attempt,
+    surfaced to the notebook so the user sees *why* a source was or wasn't
+    used rather than features silently appearing or not."""
+
+    source: str                       # "field" or "mom"
+    path: str
+    used: bool
+    n_complete: int
+    truncated: bool
+    bytes_available: int
+    bytes_required_per_snapshot: int
+    reason: str
+    feature_names: List[str] = field(default_factory=list)
+
+
+def build_field_mom_features(
+    path: str | Path,
+    run_info: "gene_io.GeneRunInfo",
+    reader,                            # gene_io.read_field_file or read_mom_file
+    source_label: str,
+    n_components: int = 3,
+    var_indices: Optional[Sequence[int]] = None,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], FieldMomFeatureReport]:
+    """End-to-end attempt to build POD features from one field/mom file
+    (or concatenated-chunk file): read -> per-variable spectral energy ->
+    POD. Never raises on insufficient data; returns
+    ``(times, features, report)`` with ``times=features=None`` when there
+    aren't enough complete snapshots, and a filled-in ``report`` either
+    way so the caller can log exactly what happened.
+    """
+    path = Path(path)
+    bytes_available = path.stat().st_size
+    snap = reader(path, run_info)
+
+    n_vars = len(snap.var_names)
+    req = gene_io.snapshot_byte_requirements(run_info, n_vars)
+    var_indices = list(var_indices) if var_indices is not None else list(range(n_vars))
+
+    if snap.n_complete == 0:
+        reason = (
+            f"0 complete snapshots in {path.name} ({bytes_available:,} bytes available; "
+            f"one complete {source_label} snapshot needs "
+            f"{req['snapshot_bytes']:,} bytes across {n_vars} variable(s))."
+        )
+        return None, None, FieldMomFeatureReport(
+            source=source_label, path=str(path), used=False,
+            n_complete=0, truncated=snap.truncated,
+            bytes_available=bytes_available,
+            bytes_required_per_snapshot=req["snapshot_bytes"],
+            reason=reason,
+        )
+
+    all_coeffs, names = [], []
+    for vi in var_indices:
+        spectra = spectral_energy_by_k(snap, var_index=vi)
+        coeffs, info = pod_features(spectra, n_components=n_components)
+        if info.get("skipped") or coeffs.shape[1] == 0:
+            continue
+        all_coeffs.append(coeffs)
+        vname = snap.var_names[vi]
+        names.extend(f"{source_label}_{vname}_pod{j}" for j in range(coeffs.shape[1]))
+
+    if not all_coeffs:
+        reason = (
+            f"{snap.n_complete} complete snapshot(s) in {path.name}, but that's still "
+            f"below the minimum of 2 needed to fit POD."
+        )
+        return None, None, FieldMomFeatureReport(
+            source=source_label, path=str(path), used=False,
+            n_complete=snap.n_complete, truncated=snap.truncated,
+            bytes_available=bytes_available,
+            bytes_required_per_snapshot=req["snapshot_bytes"],
+            reason=reason,
+        )
+
+    features = np.concatenate(all_coeffs, axis=1)
+    report = FieldMomFeatureReport(
+        source=source_label, path=str(path), used=True,
+        n_complete=snap.n_complete, truncated=snap.truncated,
+        bytes_available=bytes_available,
+        bytes_required_per_snapshot=req["snapshot_bytes"],
+        reason=f"used {snap.n_complete} complete snapshot(s).",
+        feature_names=names,
+    )
+    return snap.times, features, report
+
+
+def merge_field_mom_features(
+    t_nrg: np.ndarray,
+    U_nrg: np.ndarray,
+    field_times: Optional[np.ndarray],
+    field_features: Optional[np.ndarray],
+    feature_names: Sequence[str],
+) -> Tuple[np.ndarray, list]:
+    """Resample POD field/mom features (built on the field/mom file's own,
+    typically coarser, time grid -- e.g. istep_field=200 vs istep_nrg=10 in
+    the supplied run) onto the nrg.dat time grid and append as extra
+    columns, the same pattern as ``merge_energy_features``. If
+    ``field_features`` is None (nothing usable was extracted), ``U_nrg`` is
+    returned unchanged."""
+    if field_features is None or field_features.shape[1] == 0:
+        return U_nrg, []
+    resampled = np.stack(
+        [resample_to_grid(field_times, field_features[:, j], t_nrg)
+         for j in range(field_features.shape[1])],
+        axis=1,
+    )
+    return np.concatenate([U_nrg, resampled], axis=1), list(feature_names)

@@ -27,8 +27,7 @@ import numpy as np
 import pandas as pd
 
 from .classical_reservoir import ESNConfig
-from .quantum_reservoir import QRCConfig
-from .circuits import CIRCUIT_CONFIGS
+from .quantum_reservoir import QRCConfig, CIRCUIT_LIBRARY
 from .experiments import GeneDataset, train_eval_esn, train_eval_qrc
 
 
@@ -47,11 +46,22 @@ ESN_SEARCH_SPACE: Dict[str, Sequence] = {
 
 QRC_SEARCH_SPACE: Dict[str, Sequence] = {
     "n_qubits": [3, 4, 5, 6, 7, 8],
-    "circuit_config": list(CIRCUIT_CONFIGS.keys()),
+    "circuit_config": list(CIRCUIT_LIBRARY.keys()),
     "epsilon_q": [0.1, 0.2, 0.3, 0.5, 0.7, 1.0],
     "input_scale": [np.pi, 1.5 * np.pi, 2 * np.pi],
     "tikhonov": [1e-8, 1e-6, 1e-4, 1e-2],
 }
+# NOTE (Eval-3 fix): this used to read
+# ``"circuit_config": list(CIRCUIT_CONFIGS.keys())`` from the old, now-removed
+# ``circuits.CIRCUIT_CONFIGS`` (string keys like "linear_linear"), while
+# ``QRCConfig`` (quantum_reservoir.py) validated ``circuit_config`` against the
+# newer int-keyed 5-config registry. Every QRC draw from this search space
+# raised ``ValueError: circuit_config must be one of [1, 2, 3, 4, 5]`` inside
+# ``sample_qrc_configs`` below, so no QRC config in a sweep run against this
+# space could ever succeed -- ``results_qrc_sweep.csv`` in the repo root
+# predates this mismatch and does not reflect the current code. Both registries
+# now live in one place (``quantum_reservoir.CIRCUIT_LIBRARY``), so this can't
+# drift out of sync again.
 
 
 def sample_esn_configs(
@@ -93,8 +103,7 @@ def sample_qrc_configs(
     attempts = 0
     while len(configs) < n and attempts < n * 20:
         attempts += 1
-        choice = {k: rnd.choice(v) if k != "circuit_config" else rnd.choice(v)
-                   for k, v in space.items()}
+        choice = {k: rnd.choice(v) for k, v in space.items()}
         key = tuple(choice.items())
         if key in seen:
             continue

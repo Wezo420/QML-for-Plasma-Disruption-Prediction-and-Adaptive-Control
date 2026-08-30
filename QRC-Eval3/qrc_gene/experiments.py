@@ -14,9 +14,9 @@ are directly comparable to the main notebook's single-run results.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 
@@ -39,6 +39,7 @@ class GeneDataset:
     t_nrg: np.ndarray
     Q_es_raw: np.ndarray            # for the early-warning experiment
     dt: float
+    field_mom_reports: list = field(default_factory=list)   # diagnostics, see below
 
 
 def load_and_prepare_gene_dataset(
@@ -50,11 +51,26 @@ def load_and_prepare_gene_dataset(
     frac_val: float = 0.15,
     frac_test: float = 0.20,
     saturation_frac_of_max_growth: float = 0.9,
+    field_path: Optional[str | Path] = None,
+    mom_path: Optional[str | Path] = None,
+    field_mom_pod_components: int = 3,
 ) -> GeneDataset:
     """End-to-end Block 1 + Block 2 pipeline: load the raw GENE files,
     remove the linear-growth transient, build the state-forecasting
     dataset and split it into washout/train/val/test, exactly as
     validated interactively while building this helper.
+
+    ``field_path`` / ``mom_path`` (optional): path to a ``field.dat`` /
+    ``mom_<species>.dat`` file (or one already concatenated from multiple
+    chunks via ``gene_io.concat_chunks``) to additionally reduce via POD
+    (``preprocessing.build_field_mom_features``) and merge in as extra
+    input features. If omitted (the default -- and the only option that
+    made sense for the single sub-snapshot-sized chunk supplied with this
+    project, see ``preprocessing``'s module-level comment above
+    ``build_field_mom_features``), the dataset is built from
+    ``nrg.dat``/``energy.dat`` alone, exactly as before. Either way,
+    ``GeneDataset.field_mom_reports`` records what was attempted and why
+    it did or didn't contribute features.
     """
     data_dir = Path(data_dir)
 
@@ -73,6 +89,23 @@ def load_and_prepare_gene_dataset(
         U_nrg, extra_names = pp.merge_energy_features(t_nrg, U_nrg, energy, energy_columns)
         feat_names = feat_names + extra_names
 
+    field_mom_reports = []
+    for path, reader, label in (
+        (field_path, gene_io.read_field_file, "field"),
+        (mom_path, gene_io.read_mom_file, "mom"),
+    ):
+        if path is None:
+            continue
+        f_times, f_feat, report = pp.build_field_mom_features(
+            path, run_info, reader, label, n_components=field_mom_pod_components,
+        )
+        field_mom_reports.append(report)
+        if f_feat is not None:
+            U_nrg, extra_names = pp.merge_field_mom_features(
+                t_nrg, U_nrg, f_times, f_feat, report.feature_names
+            )
+            feat_names = feat_names + extra_names
+
     t_trim, U_trim = pp.remove_transient(t_nrg, U_nrg, n_transient)
 
     split, scaler = pp.build_dataset(
@@ -86,7 +119,7 @@ def load_and_prepare_gene_dataset(
 
     return GeneDataset(
         split=split, scaler=scaler, feature_names=feat_names, run_info=run_info,
-        t_nrg=t_nrg, Q_es_raw=Q_es_raw, dt=dt,
+        t_nrg=t_nrg, Q_es_raw=Q_es_raw, dt=dt, field_mom_reports=field_mom_reports,
     )
 
 

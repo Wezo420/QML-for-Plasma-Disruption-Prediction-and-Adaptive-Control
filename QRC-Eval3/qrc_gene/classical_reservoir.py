@@ -30,7 +30,7 @@ from scipy.sparse.linalg import eigs as sparse_eigs
 
 @dataclass
 class ESNConfig:
-    """Hyperparameters of a classical reservoir ("linear layer")
+    """Hyperparameters of a classical reservoir 
     configuration -- the knobs an ensemble sweep varies."""
 
     N_units: int = 200          # reservoir size

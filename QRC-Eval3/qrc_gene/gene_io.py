@@ -446,3 +446,47 @@ def read_mom_file(path, run_info: GeneRunInfo, max_snapshots=None) -> BinarySnap
     names = MOM_VAR_NAMES_ALL[: run_info.n_moms]
     return read_gene_binary(path, run_info.nx0, run_info.nky0, run_info.nz0,
                              names, max_snapshots=max_snapshots)
+
+
+# --------------------------------------------------------------------------
+# Chunk diagnostics / concatenation (Eval-3 addition)
+# --------------------------------------------------------------------------
+
+def snapshot_byte_requirements(run_info: GeneRunInfo, n_vars: int, marker_bytes: int = 4) -> Dict[str, int]:
+    """Exact byte accounting for one complete field/mom snapshot under
+    ``run_info``'s grid, for diagnosing why a chunk file does or doesn't
+    contain any complete snapshots (rather than guessing). A snapshot on
+    disk is one time record (an 8-byte double) plus one record per
+    variable (``nx0*nky0*nz0`` complex128 numbers each), each record
+    wrapped in leading+trailing ``marker_bytes`` length markers."""
+    n_per_var = run_info.nx0 * run_info.nky0 * run_info.nz0
+    var_payload_bytes = n_per_var * 16  # complex128 = 16 bytes
+    var_record_bytes = var_payload_bytes + 2 * marker_bytes
+    time_record_bytes = 8 + 2 * marker_bytes
+    return {
+        "n_per_var": n_per_var,
+        "var_payload_bytes": var_payload_bytes,
+        "var_record_bytes": var_record_bytes,
+        "time_record_bytes": time_record_bytes,
+        "snapshot_bytes": time_record_bytes + n_vars * var_record_bytes,
+    }
+
+
+def concat_chunks(paths: Sequence[str | Path], out_path: str | Path) -> Path:
+    """Concatenate several sequentially-numbered chunk files
+    (``field_chunk_1.dat``, ``field_chunk_2.dat``, ...) into one file at
+    ``out_path``, in the order given, so ``read_gene_binary`` can be run
+    against the combined byte stream. Each chunk is assumed to be a raw
+    contiguous byte range of the original file with no chunk-specific
+    header of its own (i.e. only the *first* chunk starts at a snapshot
+    boundary; this is a straight byte concatenation, not snapshot-aware
+    merging). Useful once more chunks of ``field.dat`` / ``mom_ions.dat``
+    become available than the single first chunk used during development
+    of this module (see ``preprocessing.build_field_mom_features``)."""
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "wb") as out_f:
+        for p in paths:
+            with open(p, "rb") as in_f:
+                out_f.write(in_f.read())
+    return out_path
