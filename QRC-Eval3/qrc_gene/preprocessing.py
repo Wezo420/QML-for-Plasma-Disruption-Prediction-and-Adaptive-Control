@@ -18,7 +18,7 @@ Implementation", slide 7):
 
 Because this GENE run is a single *statistically stationary* nonlinear
 saturated-turbulence simulation (not a swept-parameter run like the
-Lorenz-63 rho-drift toy problem in the reference repo), there is no
+Lorenz-63 rho-drift), there is no
 explicit ground-truth bifurcation parameter to build Y_warning from.
 Instead we build a physically motivated proxy from the run itself: the
 electrostatic heat flux Q_es (the quantity that actually characterises

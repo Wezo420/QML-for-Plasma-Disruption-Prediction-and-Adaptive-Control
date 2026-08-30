@@ -3,13 +3,6 @@ quantum_reservoir.py
 =====================
 Quantum Reservoir Computer (QRC) -- Block 3A of the project block diagram.
 
-This is a from-scratch rewrite (Eval-3) of the previous ``quantum_reservoir.py``.
-Nothing here calls into the old module's helper functions or into
-``circuits.py``'s ``ENCODER_REGISTRY`` -- every gate-application routine below is
-written fresh. The reason for the rewrite is that the *ensemble* around the old
-module was broken (see ``ensemble_search.py``'s changelog comment) and the
-circuit set it offered had stopped growing, so this file both fixes the wiring
-and adds four new circuit families on top of the five already present.
 
 CIRCUIT LIBRARY
 ---------------
@@ -24,13 +17,9 @@ names in the docstrings below (``Unitary4``, ``Unitary_FullyEnt``,
 ``Unitary_C``) are that file's own names, kept here purely so the mapping is
 traceable). Two more (``magri_reverse_ent``, ``magri_bidirectional``) port two
 block types that exist in that repo's ``unitaryblock.py`` but were never wired
-into any of its five official configs -- i.e. these are genuinely new ensemble
-members, not a relabelling of what configs 1-5 already covered. The eighth
-(``qasm_reupload_dual_a``) is a reconstruction of the user-supplied
-``ReservoirCircuit_Nonlinear_GENE_Config1.qasm`` circuit (see the docstring on
-that entry below for exactly what was and wasn't available to reconstruct it
-from, and what was assumed).
+into any of its five official configs. The eighth (``qasm_reupload_dual_a``) is a new configuration.
 
+``ReservoirCircuit_Nonlinear_GENE_Config1.qasm`` circuit
     magri_full_fullsym      P:chain-ladder -> X:full-ent        -> A:full-ent-sym   [recurrent]
     magri_linear            P:chain-ladder -> X:chain-ladder     -> A:chain-ladder   [recurrent]
     magri_linear_x2         X:chain-ladder x2 (no P)                -> A:chain-ladder
@@ -300,8 +289,6 @@ CIRCUIT_LIBRARY: Dict[str, CircuitSpec] = {
     ),
     "qasm_reupload_dual_a": CircuitSpec(
         _build_qasm_reupload_dual_a, False,
-        "Reconstructed from user-supplied ReservoirCircuit_Nonlinear_GENE_Config1.qasm "
-        "(via qasm_aer.ipynb's rendered circuit diagram -- see module docstring) [NEW to ensemble]",
         "H -> X:chain-ladder x n_qubits (data re-upload) -> A:dense-entangle-mirrored x2",
     ),
 }

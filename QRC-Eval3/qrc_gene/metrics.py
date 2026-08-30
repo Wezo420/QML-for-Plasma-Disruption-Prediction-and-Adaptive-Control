@@ -1,8 +1,6 @@
 """
 metrics.py
 ==========
-Evaluation metrics matching the project's Test Cases (presentation slide
-12) and Overview of Implementation (slide 7):
 
     TC-03 / TC-04  Noise robustness  -> mse / nmse
     TC-05 / TC-06  Prediction time   -> valid_prediction_time (VPT)
